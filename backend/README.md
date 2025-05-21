@@ -1,132 +1,165 @@
-# YouTube Playlist Tracker Backend
+# LearnLoop Backend
 
-Backend service for the YouTube Playlist Tracker application.
+LearnLoop is a powerful YouTube video tracking and organization platform. This is the backend service that powers the LearnLoop application.
 
-## Setup
+## Tech Stack
 
-1. Install dependencies:
-   ```
-   npm install
-   ```
+- Node.js
+- Express.js
+- MongoDB
+- Redis (for caching)
+- JWT Authentication
+- Google OAuth2
 
-2. Create a `.env` file in the root of the `backend` directory with the following variables:
-   ```
-   PORT=5000
-   MONGO_URI=mongodb://localhost:27017/utracker
-   JWT_SECRET=your_jwt_secret_key_here
-   GOOGLE_CLIENT_ID=your_google_client_id_here
-   REDIS_URL=redis://localhost:6379
-   REDIS_PASSWORD=your_redis_password_here_if_needed
-   YOUTUBE_API_KEY=your_youtube_api_key_here
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
+## Prerequisites
 
-3. Run the development server:
-   ```
-   npm run dev
-   ```
+- Node.js (v14 or higher)
+- MongoDB
+- Redis
+- Google OAuth2 credentials
 
 ## Environment Variables
 
-- `PORT`: The port on which the server will run (default: 5000)
-- `MONGO_URI`: MongoDB connection string
-- `JWT_SECRET`: Secret key for JWT token generation
-- `GOOGLE_CLIENT_ID`: Google OAuth Client ID
-- `REDIS_URL`: Redis URL (must begin with `redis://` or `rediss://`)
-- `REDIS_PASSWORD`: Redis password (optional, required if your Redis instance needs authentication)
-- `YOUTUBE_API_KEY`: YouTube Data API v3 key
-- `OPENAI_API_KEY`: OpenAI API key for AI summary generation
+Create a `.env` file in the root directory with the following variables:
 
-### Redis Configuration
-
-For local development, you can use:
-```
-REDIS_URL=redis://localhost:6379
+```env
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=your_jwt_secret
+GOOGLE_CLIENT_ID=your_google_client_id
+REDIS_URL=your_redis_url
+OPENAI_API_KEY=your_openai_api_key_here
+PORT=your_port
+REDIS_PASSWORD=your_redis_password
+REDIS_URL=your_redis_url
+YOUTUBE_API_KEY=your_youtube_api_key
 ```
 
-For Upstash Redis, use the URL from your Upstash dashboard:
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+```bash
+npm install
 ```
-REDIS_URL=redis://your-upstash-url.upstash.io:12345
-REDIS_PASSWORD=your-upstash-password
+3. Start the server:
+```bash
+npm start
 ```
 
-The application will continue to function even if Redis is unavailable, but caching functionality will be disabled.
+## API Routes
 
-## API Endpoints
+### Authentication Routes
 
-### Authentication
-- `POST /api/auth/google`: Authenticate with Google OAuth
-- `GET /api/auth/user`: Get the current user's profile (requires authentication)
+#### POST /api/auth/google
+- Authenticates user with Google OAuth
+- Returns JWT token and user data
+- Request body: `{ tokenId, userData }`
 
-### User Settings
-- `POST /api/user/category`: Create a new category (requires authentication)
-  ```json
-  {
-    "category": "string"
-  }
-  ```
-- `GET /api/user/categories`: Fetch all categories for the current user (requires authentication)
-- `POST /api/user/daily-goal`: Set or update current daily goal (requires authentication)
-  ```json
-  {
-    "dailyGoal": "string"
-  }
-  ```
-- `GET /api/user/daily-goal`: Fetch current daily goal (requires authentication)
+#### GET /api/auth/user
+- Gets authenticated user data
+- Requires JWT token in Authorization header
+- Returns user profile data
 
-### Playlist Management
-- `POST /api/playlist/add`: Add a new YouTube playlist (requires authentication)
-  ```json
-  {
-    "ytPlaylistUrl": "https://www.youtube.com/playlist?list=PLAYLIST_ID",
-    "name": "Custom Playlist Name",
-    "category": "Category Name"
-  }
-  ```
-- `GET /api/playlist`: Get all playlists for the current user with progress stats (requires authentication)
-- `GET /api/playlist/:id`: Get details of a specific playlist with all videos (requires authentication)
-- `DELETE /api/playlist/:id`: Delete a playlist and all its videos (requires authentication)
+### User Routes
 
-### Video Management
-- `GET /api/video/:id`: Get details of a specific video (requires authentication)
-- `PATCH /api/video/:id/status`: Update video status (requires authentication)
-  ```json
-  {
-    "status": "to-watch | in-progress | completed"
-  }
-  ```
-- `PATCH /api/video/:id/note`: Update video notes (requires authentication)
-  ```json
-  {
-    "note": "Your notes about the video"
-  }
-  ```
-- `PATCH /api/video/:id/time`: Update time spent on video (requires authentication)
-  ```json
-  {
-    "timeSpent": 300
-  }
-  ```
-- `PATCH /api/video/:id/ai-summary`: Save AI-generated summary (requires authentication)
-  ```json
-  {
-    "summary": "AI-generated summary content"
-  }
-  ```
-- `POST /api/video/:id/summary-to-note`: Copy AI summary to notes (requires authentication)
-- `POST /api/video/:id/generate-summary`: Generate AI summary from YouTube transcript (requires authentication)
+#### POST /api/user/category
+- Creates a new category
+- Request body: `{ category: string }`
 
-### Badge Management
-- `GET /api/badge/my-badges`: Fetch all badges earned by the user (requires authentication)
-- `POST /api/badge/check-badges`: Evaluate user progress and assign new badges (requires authentication)
-- `GET /api/badge/all`: Get a list of all possible badges in the system (requires authentication)
+#### GET /api/user/categories
+- Fetches all user categories
 
-## Technology Stack
-- Node.js
-- Express.js
-- MongoDB with Mongoose
-- Upstash Redis for caching
-- JWT for authentication
-- Google OAuth for login
-- YouTube Data API v3
-- OpenAI API for transcript summarization 
+#### PUT /api/user/category
+- Renames a category
+- Request body: `{ oldCategory: string, newCategory: string }`
+
+#### DELETE /api/user/category/:categoryName
+- Deletes a category
+- Query params: `deleteAssociatedPlaylists` (boolean)
+
+#### POST /api/user/daily-goal
+- Sets/updates user's daily goal
+- Request body: `{ dailyGoal: string }`
+
+#### GET /api/user/daily-goal
+- Fetches user's current daily goal
+
+### Playlist Routes
+
+#### POST /api/playlist
+- Creates a new playlist
+- Request body: `{ title: string, category: string, description?: string }`
+
+#### GET /api/playlist
+- Fetches all playlists for the user
+- Query params: `category` (optional)
+
+#### GET /api/playlist/:id
+- Fetches a specific playlist by ID
+
+#### PUT /api/playlist/:id
+- Updates a playlist
+- Request body: `{ title?: string, category?: string, description?: string }`
+
+#### DELETE /api/playlist/:id
+- Deletes a playlist and its associated videos
+
+### Video Routes
+
+#### POST /api/video
+- Adds a new video to a playlist
+- Request body: `{ playlistId: string, videoId: string, title: string, thumbnail: string }`
+
+#### GET /api/video
+- Fetches videos for a playlist
+- Query params: `playlistId: string`
+
+#### PUT /api/video/:id
+- Updates video details
+- Request body: `{ title?: string, notes?: string, watched?: boolean }`
+
+#### DELETE /api/video/:id
+- Removes a video from a playlist
+
+### Badge Routes
+
+#### GET /api/badge
+- Fetches all badges for the user
+
+#### POST /api/badge
+- Awards a new badge to the user
+- Request body: `{ type: string, name: string }`
+
+## Caching
+
+The backend implements Redis caching for:
+- User data
+- Categories
+- Playlists
+- Daily goals
+
+Cache duration is set to 24 hours by default.
+
+## Error Handling
+
+All routes implement proper error handling with appropriate HTTP status codes:
+- 400: Bad Request
+- 401: Unauthorized
+- 404: Not Found
+- 500: Server Error
+
+## Security
+
+- JWT-based authentication
+- Google OAuth2 integration
+- Protected routes using middleware
+- Input validation
+- Rate limiting (implemented in production)
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request 
