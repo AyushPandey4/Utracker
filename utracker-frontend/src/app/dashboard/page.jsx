@@ -7,6 +7,8 @@ import { usePlaylist } from '../../context/PlaylistContext';
 import { useTheme } from '../../context/ThemeContext';
 import Sidebar from '../../components/dashboard/Sidebar';
 import DailyGoal from '../../components/dashboard/DailyGoal';
+import RewatchWidget from '../../components/dashboard/RewatchWidget';
+import PinnedVideosWidget from '../../components/dashboard/PinnedVideosWidget';
 import PlaylistGrid from '../../components/dashboard/PlaylistGrid';
 import AddPlaylistModal from '../../components/dashboard/AddPlaylistModal';
 import axios from 'axios';
@@ -26,7 +28,9 @@ export default function Dashboard() {
     getFilteredPlaylists,
     addPlaylist,
     deletePlaylist,
-    addCategory
+    addCategory,
+    renameCategory,
+    deleteCategory
   } = usePlaylist();
   
   const [dailyGoal, setDailyGoal] = useState('');
@@ -105,12 +109,25 @@ export default function Dashboard() {
 
   const filteredPlaylists = getFilteredPlaylists();
 
+  // Add this inside the function that processes playlists data
+  const processedPlaylists = filteredPlaylists.map(playlist => {
+    // If rewatchCount is not provided by the API, calculate it from the videos if available
+    if (playlist.rewatchCount === undefined && playlist.videos) {
+      playlist.rewatchCount = playlist.videos.filter(v => v.status === 'rewatch').length;
+    } else if (playlist.rewatchCount === undefined) {
+      // If no videos are available, default to 0
+      playlist.rewatchCount = 0;
+    }
+    
+    return playlist;
+  });
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 pt-6">
       <div className="container mx-auto px-4 flex flex-col gap-6">
         {/* Top Navigation Bar */}
         <div className="flex justify-between items-center mb-2">
-          <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">Utracker</h1>
+          <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">LearnLoop</h1>
           
           <div className="flex items-center gap-4">
             {/* Dark mode toggle */}
@@ -176,7 +193,7 @@ export default function Dashboard() {
           <h2 className="text-xl md:text-2xl font-semibold">
             Hello, <span className="text-blue-600 dark:text-blue-400">{user.name}</span> 👋
           </h2>
-          <p className="text-gray-600 dark:text-gray-300 mt-1">Welcome to your playlist dashboard</p>
+          <p className="text-gray-600 dark:text-gray-300 mt-1">Welcome to your learning dashboard</p>
         </div>
         
         <div className="flex flex-col md:flex-row gap-6">
@@ -187,30 +204,32 @@ export default function Dashboard() {
           setActiveCategory={setActiveCategory}
           onAddPlaylistClick={() => setIsAddPlaylistModalOpen(true)}
           onAddCategory={addCategory}
+            onRenameCategory={renameCategory}
+            onDeleteCategory={deleteCategory}
           badgeCount={badges.length}
         />
         
         {/* Main Content */}
-        <div className="flex-1">
-          {/* Daily Goal Section */}
+          <div className="flex-1 space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Daily Goal Widget */}
           <DailyGoal 
             dailyGoal={dailyGoal} 
             onUpdate={handleDailyGoalUpdate} 
           />
           
-          {/* Playlists Grid */}
-          <div className="mt-8">
-            {dashboardLoading || playlistLoading ? (
-              <div className="flex justify-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700"></div>
+              {/* Rewatch Widget */}
+              <RewatchWidget />
               </div>
-            ) : (
+            
+            {/* Pinned Videos Widget */}
+            <PinnedVideosWidget />
+            
+            {/* Playlist Grid */}
               <PlaylistGrid 
-                playlists={filteredPlaylists} 
+              playlists={processedPlaylists} 
                 onDelete={deletePlaylist}
               />
-            )}
-            </div>
           </div>
         </div>
       </div>

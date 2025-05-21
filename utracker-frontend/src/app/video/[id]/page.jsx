@@ -6,6 +6,8 @@ import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/Navbar';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import TagManager from '@/components/playlist/TagManager';
+import ResourceManager from '@/components/playlist/ResourceManager';
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
@@ -25,6 +27,9 @@ export default function VideoPage() {
   const [noteSaved, setNoteSaved] = useState(true);
   const [copySuccess, setCopySuccess] = useState(false);
   const [timeSaving, setTimeSaving] = useState(false);
+  const [tags, setTags] = useState([]);
+  const [isCustomPlaylist, setIsCustomPlaylist] = useState(false);
+  const [removingVideo, setRemovingVideo] = useState(false);
 
   // References for tracking time spent
   const startTimeRef = useRef(null);
@@ -180,10 +185,35 @@ export default function VideoPage() {
     if (!video) return;
     
     try {
-      await axios.patch(`${API_URL}/api/video/${id}/status`, { status: newStatus });
+      // Get token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication required');
+        router.push('/');
+        return;
+      }
+      
+      // Set auth header for this request
+      const headers = { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      await axios.patch(
+        `${API_URL}/api/video/${id}/status`, 
+        { status: newStatus },
+        { headers }
+      );
+      
       setVideo(prev => ({ ...prev, status: newStatus }));
     } catch (err) {
       console.error('Error updating status:', err);
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        setError('Your session has expired. Please log in again.');
+        router.push('/');
+      } else {
+        setError('Failed to update status. Please try again.');
+      }
     }
   };
 
@@ -294,6 +324,54 @@ export default function VideoPage() {
     }
   };
 
+  // Update tags when video data is fetched
+  useEffect(() => {
+    if (video) {
+      setTags(video.tags || []);
+    }
+  }, [video]);
+
+  const handleTagsUpdate = (newTags) => {
+    setTags(newTags);
+  };
+
+  const handleResourcesUpdate = async (newResources) => {
+    try {
+      setVideo(prev => ({
+        ...prev,
+        resources: newResources
+      }));
+    } catch (err) {
+      console.error('Error updating resources:', err);
+    }
+  };
+
+  // Update isCustomPlaylist when video data is fetched
+  useEffect(() => {
+    if (video) {
+      setIsCustomPlaylist(video.isCustomPlaylist);
+    }
+  }, [video]);
+
+  const handleRemoveFromPlaylist = async () => {
+    if (!window.confirm('Are you sure you want to remove this video from the playlist?')) {
+      return;
+    }
+
+    setRemovingVideo(true);
+    try {
+      const response = await axios.delete(`${API_URL}/api/video/${id}/remove-from-playlist`);
+      if (response.data.success) {
+        router.push(`/playlist/${video.playlistId}`);
+      }
+    } catch (err) {
+      console.error('Error removing video:', err);
+      setError(err.response?.data?.msg || 'Failed to remove video from playlist');
+    } finally {
+      setRemovingVideo(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -353,20 +431,46 @@ export default function VideoPage() {
       <div className="container mx-auto max-w-7xl px-4 py-8">
         {/* Header with breadcrumb navigation */}
         <div className="mb-6">
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <button 
-              onClick={() => router.push(`/playlist/${video.playlistId}`)}
-              className="text-blue-600 dark:text-blue-400 hover:underline flex items-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-              </svg>
-              Back to {video.playlistName}
-            </button>
-            <span className="text-gray-400 dark:text-gray-600">/</span>
-            <span className="text-gray-700 dark:text-gray-300 font-medium truncate">
-              {video.title}
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => router.push(`/playlist/${video.playlistId}`)}
+                className="text-blue-600 dark:text-blue-400 hover:underline flex items-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                </svg>
+                Back to {video.playlistName}
+              </button>
+              <span className="text-gray-400 dark:text-gray-600">/</span>
+              <span className="text-gray-700 dark:text-gray-300 font-medium truncate">
+                {video.title}
+              </span>
+            </div>
+            {isCustomPlaylist && (
+              <button
+                onClick={handleRemoveFromPlaylist}
+                disabled={removingVideo}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium disabled:opacity-50 flex items-center"
+              >
+                {removingVideo ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Remove from Playlist
+                  </>
+                )}
+              </button>
+            )}
           </div>
           
           <div className="flex flex-wrap items-center gap-3 mb-2">
@@ -392,14 +496,20 @@ export default function VideoPage() {
           {/* YouTube Player */}
           <div className="w-full lg:w-2/3">
             <div className="bg-black rounded-lg overflow-hidden aspect-video mb-4">
-              <iframe
-                className="w-full h-full"
-                src={`https://www.youtube.com/embed/${video.ytId}`}
-                title={video.title}
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              ></iframe>
+              {video ? (
+                <iframe
+                  className="w-full h-full"
+                  src={`https://www.youtube.com/embed/${video.ytId}`}
+                  title={video.title}
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <LoadingSpinner size="lg" />
+                </div>
+              )}
             </div>
           </div>
 
@@ -441,7 +551,26 @@ export default function VideoPage() {
                 >
                   Completed
                 </button>
+                <button
+                  onClick={() => updateStatus('rewatch')}
+                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium ${
+                    video.status === 'rewatch'
+                      ? 'bg-purple-200 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                      : 'bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Need to Rewatch
+                </button>
               </div>
+            </div>
+
+            {/* Resources Section */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+              <ResourceManager 
+                videoId={video.id}
+                resources={video.resources || []}
+                onResourcesUpdate={handleResourcesUpdate}
+              />
             </div>
 
             {/* Time Tracker */}
@@ -482,9 +611,25 @@ export default function VideoPage() {
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
                   Notes
                 </h2>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {noteSaved ? 'Saved' : 'Saving...'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(note);
+                      setNoteSaved(true);
+                      setTimeout(() => setNoteSaved(false), 2000);
+                    }}
+                    className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title="Copy notes"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                      <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                    </svg>
+                  </button>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {noteSaved ? 'Saved' : 'Saving...'}
+                  </span>
+                </div>
               </div>
               <textarea
                 value={note}
@@ -544,7 +689,6 @@ export default function VideoPage() {
                     {video.aiSummary}
                   </div>
                   
-                  {/* Add larger, more prominent copy button */}
                   <button
                     onClick={copySummaryToNotes}
                     className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center"
@@ -561,6 +705,16 @@ export default function VideoPage() {
                   No AI summary has been generated yet. Click the "Generate Summary" button to create one.
                 </div>
               )}
+            </div>
+
+            {/* Tags */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Tags</h2>
+              <TagManager 
+                videoId={video.id} 
+                initialTags={tags} 
+                onTagsUpdate={handleTagsUpdate} 
+              />
             </div>
           </div>
         </div>

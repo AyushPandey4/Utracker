@@ -18,6 +18,7 @@ export default function BadgesPage() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [checkingBadges, setCheckingBadges] = useState(false);
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+  const [syncingBadges, setSyncingBadges] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [badgeCategories, setBadgeCategories] = useState({
     playlists: [],
@@ -154,6 +155,66 @@ export default function BadgesPage() {
       }, 5000);
     } finally {
       setCleaningDuplicates(false);
+    }
+  };
+
+  // Sync badges with playlists
+  const syncBadges = async () => {
+    try {
+      setSyncingBadges(true);
+      
+      // Use the dedicated badge sync endpoint
+      const response = await axios.post(`${API_URL}/api/badge/sync`);
+      
+      if (response.data.success) {
+        // Update badges list with the synced data
+        setBadges(response.data.badges || []);
+        // Recategorize badges
+        categorizeUserBadges(response.data.badges || []);
+        
+        // Show notification with stats
+        const stats = response.data.stats;
+        let message = 'Badges synchronized successfully. ';
+        
+        if (stats.orphanedBadgesRemoved > 0) {
+          message += `Removed ${stats.orphanedBadgesRemoved} orphaned badge(s). `;
+        }
+        
+        if (stats.duplicateBadgesRemoved > 0) {
+          message += `Removed ${stats.duplicateBadgesRemoved} duplicate badge(s). `;
+        }
+        
+        if (stats.newBadgesAdded > 0) {
+          message += `Added ${stats.newBadgesAdded} new badge(s). `;
+        }
+        
+        setNotification({
+          show: true,
+          message: message.trim()
+        });
+      } else {
+        setNotification({
+          show: true,
+          message: 'Synced badges but no changes were made.'
+        });
+      }
+      
+      // Hide notification after 5 seconds
+      setTimeout(() => {
+        setNotification({ show: false, message: '' });
+      }, 5000);
+    } catch (error) {
+      console.error('Error syncing badges:', error);
+      setNotification({
+        show: true,
+        message: 'Error syncing badges. Please try again.'
+      });
+      
+      setTimeout(() => {
+        setNotification({ show: false, message: '' });
+      }, 5000);
+    } finally {
+      setSyncingBadges(false);
     }
   };
 
@@ -323,6 +384,23 @@ export default function BadgesPage() {
                 </span>
               ) : (
                 'Fix Duplicates'
+              )}
+            </button>
+            <button
+              onClick={syncBadges}
+              disabled={syncingBadges}
+              className="px-4 py-2 text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors"
+            >
+              {syncingBadges ? (
+                <span className="flex items-center">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Syncing...
+                </span>
+              ) : (
+                'Sync Badges'
               )}
             </button>
             <button

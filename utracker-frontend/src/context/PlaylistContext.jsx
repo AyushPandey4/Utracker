@@ -45,11 +45,19 @@ export function PlaylistProvider({ children }) {
 
   const addPlaylist = async (playlistData) => {
     try {
-      // Make sure backend required fields are set
-      if (!playlistData.name || !playlistData.ytPlaylistUrl || !playlistData.category) {
+      // Make sure name is provided
+      if (!playlistData.name) {
         return { 
           success: false, 
-          message: 'Name, YouTube playlist URL, and category are required' 
+          message: 'Playlist name is required' 
+        };
+      }
+      
+      // If not a custom playlist, validate YouTube URL
+      if (!playlistData.isCustomPlaylist && !playlistData.ytPlaylistUrl) {
+        return { 
+          success: false, 
+          message: 'YouTube playlist URL is required' 
         };
       }
       
@@ -74,7 +82,7 @@ export function PlaylistProvider({ children }) {
       // Generic error handling
       return { 
         success: false, 
-        message: 'Failed to add playlist. Please check your playlist URL and try again.' 
+        message: 'Failed to add playlist. Please check your input and try again.' 
       };
     }
   };
@@ -101,9 +109,115 @@ export function PlaylistProvider({ children }) {
     }
   };
 
+  const renameCategory = async (oldCategoryName, newCategoryName) => {
+    try {
+      const response = await axios.put(`${API_URL}/api/user/category`, { 
+        oldCategory: oldCategoryName, 
+        newCategory: newCategoryName 
+      });
+      
+      setCategories(response.data);
+      
+      // If the active category is being renamed, update the active category
+      if (activeCategory === oldCategoryName) {
+        setActiveCategory(newCategoryName);
+      }
+      
+      // Refresh playlists to get updated category names
+      await fetchPlaylists();
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error renaming category:', error.message);
+      const errorMessage = error.response?.data?.msg || 'Failed to rename category';
+      return { success: false, message: errorMessage };
+    }
+  };
+
+  const deleteCategory = async (categoryName, deleteAssociatedPlaylists = false) => {
+    try {
+      const response = await axios.delete(`${API_URL}/api/user/category/${categoryName}?deleteAssociatedPlaylists=${deleteAssociatedPlaylists}`);
+      
+      // Update categories
+      setCategories(response.data.categories);
+      
+      // If playlists were deleted, refresh the playlist list
+      if (response.data.deletedPlaylistsCount > 0) {
+        await fetchPlaylists();
+      }
+      
+      // If the deleted category was active, reset to "all"
+      if (activeCategory === categoryName) {
+        setActiveCategory('all');
+      }
+      
+      return { 
+        success: true,
+        deletedPlaylistsCount: response.data.deletedPlaylistsCount
+      };
+    } catch (error) {
+      console.error('Error deleting category:', error.message);
+      
+      // If there are playlists with this category, return a special error
+      if (error.response?.data?.hasPlaylists) {
+        return { 
+          success: false, 
+          message: error.response.data.msg,
+          hasPlaylists: true,
+          playlistCount: error.response.data.count
+        };
+      }
+      
+      const errorMessage = error.response?.data?.msg || 'Failed to delete category';
+      return { success: false, message: errorMessage };
+    }
+  };
+
   const getFilteredPlaylists = () => {
     if (activeCategory === 'all') return playlists;
     return playlists.filter(playlist => playlist.category === activeCategory);
+  };
+
+  // Add a video to a playlist
+  const addVideoToPlaylist = async (playlistId, videoUrl) => {
+    console.log('PlaylistContext: Adding video to playlist', { playlistId, videoUrl });
+    
+    try {
+      // Check if token exists and set authorization header
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Authentication required');
+        return { success: false, message: 'Authentication required' };
+      }
+      
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      console.log('Calling API endpoint:', `${API_URL}/api/playlist/${playlistId}/add-video`);
+      const response = await axios.post(`${API_URL}/api/playlist/${playlistId}/add-video`, { videoUrl });
+      console.log('API response:', response.data);
+      
+      // Refresh playlists to update the UI
+      await fetchPlaylists();
+      
+      return { success: true, data: response.data };
+    } catch (error) {
+      console.error('Error adding video to playlist:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Handle specific error messages from the backend
+      if (error.response && error.response.data && error.response.data.msg) {
+        return { 
+          success: false, 
+          message: error.response.data.msg 
+        };
+      }
+      
+      // Generic error handling
+      return { 
+        success: false, 
+        message: 'Failed to add video. Please check the URL and try again.' 
+      };
+    }
   };
 
   return (
@@ -117,6 +231,9 @@ export function PlaylistProvider({ children }) {
       addPlaylist,
       deletePlaylist,
       addCategory,
+      renameCategory,
+      deleteCategory,
+      addVideoToPlaylist,
       refreshPlaylists: fetchPlaylists
     }}>
       {children}

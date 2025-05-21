@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
 
+// Fallback JWT secret in case environment variable is not set
+const JWT_SECRET = process.env.JWT_SECRET || 'utracker_default_secret_key';
+
 const authenticateToken = (req, res, next) => {
   // Get token from headers (or cookies)
   const authHeader = req.headers['authorization'] || '';
@@ -12,7 +15,7 @@ const authenticateToken = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     
     // The token payload contains { user: { id: '...' } }
     // Extract the user object and assign it to req.user

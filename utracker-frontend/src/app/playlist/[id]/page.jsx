@@ -6,8 +6,11 @@ import axios from 'axios';
 import Navbar from '@/components/Navbar';
 import PlaylistHeader from '@/components/playlist/PlaylistHeader';
 import VideoList from '@/components/playlist/VideoList';
+import DraggableVideoList from '@/components/playlist/DraggableVideoList';
+import RewatchSection from '@/components/playlist/RewatchSection';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import { useAuth } from '@/context/AuthContext';
+import { usePlaylist } from '@/context/PlaylistContext';
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
@@ -17,7 +20,11 @@ export default function PlaylistPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { user } = useAuth();
+  const { addVideoToPlaylist } = usePlaylist();
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState('all');
+  const hasRewatchVideos = playlist?.videos.some(video => video.status === 'rewatch') || false;
+  const [activeTrackingId, setActiveTrackingId] = useState(null);
   
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -26,7 +33,6 @@ export default function PlaylistPage() {
     }
   }, [user, loading, router]);
 
-  useEffect(() => {
     const fetchPlaylist = async () => {
       try {
         // Make sure we have authentication token
@@ -55,6 +61,7 @@ export default function PlaylistPage() {
       }
     };
 
+  useEffect(() => {
     if (id && user) {
       fetchPlaylist();
     }
@@ -204,6 +211,121 @@ export default function PlaylistPage() {
     }
   };
 
+  const handleAddVideo = async (videoUrl) => {
+    console.log('handleAddVideo called with:', videoUrl);
+    
+    try {
+      console.log('Calling addVideoToPlaylist with:', id, videoUrl);
+      const result = await addVideoToPlaylist(id, videoUrl);
+      console.log('addVideoToPlaylist result:', result);
+      
+      if (result.success) {
+        // Refresh playlist data
+        await fetchPlaylist();
+        return { success: true };
+      } else {
+        console.error('Error from addVideoToPlaylist:', result.message);
+        return { success: false, message: result.message };
+      }
+    } catch (err) {
+      console.error('Exception in handleAddVideo:', err);
+      return { success: false, message: 'Failed to add video' };
+    }
+  };
+
+  // Handle video time tracking
+  const handleStartTracking = async (videoId) => {
+    setActiveTrackingId(videoId);
+  };
+
+  const handleStopTracking = async (videoId) => {
+    if (activeTrackingId === videoId) {
+      setActiveTrackingId(null);
+    }
+  };
+
+  // Update tags for a video
+  const handleUpdateTags = async (videoId, newTags) => {
+    try {
+      // No need to make an API call here as the TagManager already updates tags via API
+      // Just update the local state to keep UI in sync
+      
+      if (!playlist) return;
+      
+      // Find and update the video in our playlist data
+      const updatedVideos = playlist.videos.map(video => {
+        if (video.id === videoId) {
+          return { ...video, tags: newTags };
+        }
+        return video;
+      });
+      
+      // Update playlist state
+      setPlaylist({
+        ...playlist,
+        videos: updatedVideos
+      });
+    } catch (err) {
+      console.error('Error updating tags:', err);
+    }
+  };
+
+  // Handle video pin toggle
+  const handleTogglePin = async (videoId) => {
+    try {
+      // Get token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Authentication required');
+        return;
+      }
+      
+      // Set auth header
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Call API to toggle pin status
+      const response = await axios.patch(`${API_URL}/api/playlist/${id}/toggle-pin-video/${videoId}`);
+      
+      if (response.data.success) {
+        // Update local state
+        setPlaylist(prev => {
+          if (!prev) return prev;
+          
+          return {
+            ...prev,
+            videos: prev.videos.map(video => 
+              video.id === videoId ? { ...video, pinned: response.data.pinned } : video
+            )
+          };
+        });
+      }
+    } catch (err) {
+      console.error('Error toggling pin status:', err);
+    }
+  };
+
+  // Handle video reordering
+  const handleReorderVideos = async (videoPositions) => {
+    try {
+      // Get token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Authentication required');
+        return;
+      }
+      
+      // Set auth header
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Call API to update positions
+      await axios.patch(`${API_URL}/api/playlist/${id}/reorder`, { videoPositions });
+      
+      // No need to update local state as it's already updated by the DraggableVideoList component
+    } catch (err) {
+      console.error('Error reordering videos:', err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -265,9 +387,100 @@ export default function PlaylistPage() {
         <PlaylistHeader 
           playlist={playlist} 
           onMarkAllComplete={markAllAsComplete} 
+          onAddVideo={handleAddVideo}
         />
         
-        {/* Video List Component */}
+        {/* Tab navigation for videos - only show if there are videos to rewatch */}
+        {hasRewatchVideos && (
+          <div className="mb-6 flex border-b border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`py-3 px-4 text-sm font-medium border-b-2 ${
+                activeTab === 'all' 
+                  ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-500' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              All Videos ({playlist.videos.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('rewatch')}
+              className={`py-3 px-4 text-sm font-medium border-b-2 ${
+                activeTab === 'rewatch' 
+                  ? 'border-purple-600 text-purple-600 dark:border-purple-500 dark:text-purple-500' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              To Rewatch ({playlist.videos.filter(v => v.status === 'rewatch').length})
+            </button>
+          </div>
+        )}
+        
+        {/* Show content based on active tab */}
+        {activeTab === 'rewatch' ? (
+          <RewatchSection 
+            videos={playlist.videos} 
+            onUpdateStatus={updateVideoStatus}
+            onTogglePin={handleTogglePin}
+          />
+        ) : (
+          <>
+            {/* Note about video ordering - only show for YouTube playlists */}
+            {playlist.ytPlaylistId && (
+              <div className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 dark:border-blue-700 p-4 mb-6 rounded-sm">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 dark:text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-blue-700 dark:text-blue-300">
+                      Videos are displayed in the original order set by the playlist creator. 
+                      The numbers in the blue circles indicate each video's position.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Custom message for custom playlists */}
+            {playlist.isCustomPlaylist && playlist.videos && playlist.videos.length > 0 && (
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border-l-4 border-indigo-400 dark:border-indigo-700 p-4 mb-6 rounded-sm">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600 dark:text-indigo-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                      <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-indigo-700 dark:text-indigo-300">
+                      This is a custom playlist. You can drag and drop videos to customize their order.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Video List Component - Use DraggableVideoList for custom playlists */}
+            {playlist.isCustomPlaylist ? (
+              <DraggableVideoList 
+                videos={playlist.videos} 
+                onUpdateStatus={updateVideoStatus}
+                onUpdateNote={updateVideoNote}
+                onUpdateTimeSpent={updateTimeSpent}
+                onGenerateAiSummary={generateAiSummary}
+                onCopySummaryToNote={copySummaryToNote}
+                onStartTracking={handleStartTracking}
+                onStopTracking={handleStopTracking}
+                activeTrackingId={activeTrackingId}
+                onTagsUpdate={handleUpdateTags}
+                onTogglePin={handleTogglePin}
+                onReorder={handleReorderVideos}
+                isCustomPlaylist={true}
+              />
+            ) : (
         <VideoList 
           videos={playlist.videos} 
           onUpdateStatus={updateVideoStatus}
@@ -275,7 +488,15 @@ export default function PlaylistPage() {
           onUpdateTimeSpent={updateTimeSpent}
           onGenerateAiSummary={generateAiSummary}
           onCopySummaryToNote={copySummaryToNote}
+                onStartTracking={handleStartTracking}
+                onStopTracking={handleStopTracking}
+                activeTrackingId={activeTrackingId}
+                onTagsUpdate={handleUpdateTags}
+                onTogglePin={handleTogglePin}
         />
+            )}
+          </>
+        )}
       </div>
     </div>
   );

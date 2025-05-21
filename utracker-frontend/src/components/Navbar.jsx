@@ -84,7 +84,7 @@ export default function Navbar() {
                     {/* Logo */}
                     <div className="flex items-center space-x-8">
                         <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                            <Link href="/">Utracker</Link>
+                            <Link href="/">LearnLoop</Link>
                         </h1>
                         
                         {/* Navigation Links - Only show when logged in */}
@@ -109,6 +109,26 @@ export default function Navbar() {
                                     }`}
                                 >
                                     Badges
+                                </Link>
+                                <Link 
+                                    href="/tags-search" 
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                        isActivePath('/tags-search')
+                                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                    }`}
+                                >
+                                    Search by Tags
+                                </Link>
+                                <Link 
+                                    href="/notes-search" 
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                        isActivePath('/notes-search')
+                                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                    }`}
+                                >
+                                    Search Notes
                                 </Link>
                             </div>
                         )}
@@ -183,6 +203,20 @@ export default function Navbar() {
                                                     onClick={() => setShowProfile(false)}
                                                 >
                                                     Badges
+                                                </Link>
+                                                <Link 
+                                                    href="/tags-search" 
+                                                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                                    onClick={() => setShowProfile(false)}
+                                                >
+                                                    Search by Tags
+                                                </Link>
+                                                <Link 
+                                                    href="/notes-search" 
+                                                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                                    onClick={() => setShowProfile(false)}
+                                                >
+                                                    Search Notes
                                                 </Link>
                                                 <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                                             </div>

@@ -11,9 +11,12 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [urlError, setUrlError] = useState('');
+  const [isCustomPlaylist, setIsCustomPlaylist] = useState(false);
 
   // Validate YouTube playlist URL format
   const validateYouTubeUrl = (url) => {
+    if (!url.trim()) return false;
+    
     try {
       const urlObj = new URL(url);
       // Most YouTube playlist URLs contain a 'list' parameter
@@ -43,6 +46,8 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
       return;
     }
     
+    // Only validate URL if not a custom playlist
+    if (!isCustomPlaylist) {
     if (!ytPlaylistUrl.trim()) {
       setUrlError('YouTube playlist URL is required');
       return;
@@ -52,6 +57,7 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
     if (!validateYouTubeUrl(ytPlaylistUrl)) {
       setUrlError('Please enter a valid YouTube playlist URL (e.g., https://www.youtube.com/playlist?list=PLAYLIST_ID)');
       return;
+      }
     }
     
     setIsSubmitting(true);
@@ -59,8 +65,9 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
     try {
       const result = await onAdd({
         name,
-        ytPlaylistUrl,
+        ytPlaylistUrl: isCustomPlaylist ? '' : ytPlaylistUrl,
         category: category || 'Uncategorized',
+        isCustomPlaylist
       });
       
       if (!result.success) {
@@ -92,6 +99,13 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
     }
   };
 
+  const togglePlaylistType = () => {
+    setIsCustomPlaylist(!isCustomPlaylist);
+    if (urlError) {
+      setUrlError('');
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 relative overflow-hidden">
@@ -114,6 +128,43 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
         
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
+            <div className="flex justify-between mb-2">
+              <label htmlFor="playlist-type" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Playlist Type
+              </label>
+            </div>
+            <div className="flex border dark:border-gray-700 rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIsCustomPlaylist(false)}
+                className={`flex-1 py-2 text-center text-sm ${
+                  !isCustomPlaylist 
+                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200' 
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                YouTube Playlist
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCustomPlaylist(true)}
+                className={`flex-1 py-2 text-center text-sm ${
+                  isCustomPlaylist 
+                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200' 
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                Custom Playlist
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {isCustomPlaylist 
+                ? 'Create an empty playlist and add videos manually later'
+                : 'Import a playlist from YouTube'}
+            </p>
+          </div>
+          
+          <div className="mb-4">
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Name *
             </label>
@@ -127,6 +178,7 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
             />
           </div>
           
+          {!isCustomPlaylist && (
           <div className="mb-4">
             <label htmlFor="ytPlaylistUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               YouTube Playlist URL *
@@ -148,6 +200,7 @@ export default function AddPlaylistModal({ onClose, onAdd, categories, onAddCate
               The URL must be from a YouTube playlist, containing the 'list=' parameter
             </p>
           </div>
+          )}
           
           <div className="mb-4">
             <label htmlFor="category" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

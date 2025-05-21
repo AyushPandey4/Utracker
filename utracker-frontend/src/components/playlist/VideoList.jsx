@@ -9,7 +9,12 @@ export default function VideoList({
   onUpdateNote, 
   onUpdateTimeSpent, 
   onGenerateAiSummary, 
-  onCopySummaryToNote 
+  onCopySummaryToNote,
+  onStartTracking,
+  onStopTracking,
+  activeTrackingId,
+  onTagsUpdate,
+  onTogglePin
 }) {
   const [expandedVideoId, setExpandedVideoId] = useState(null);
 
@@ -48,6 +53,11 @@ export default function VideoList({
           onUpdateTimeSpent={(time) => onUpdateTimeSpent(video.id, time)}
           onGenerateAiSummary={() => onGenerateAiSummary(video.id)}
           onCopySummaryToNote={() => onCopySummaryToNote(video.id)}
+          onStartTracking={(videoId) => onStartTracking(videoId)}
+          onStopTracking={(videoId) => onStopTracking(videoId)}
+          isTimeTracking={activeTrackingId === video.id}
+          onTagsUpdate={(videoId, tags) => onTagsUpdate(videoId, tags)}
+          onTogglePin={() => onTogglePin(video.id)}
         />
       ))}
     </div>

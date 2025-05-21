@@ -6,6 +6,9 @@ const authenticateToken = require('../middleware/auth');
 const User = require('../models/User');
 const { setCache, getCache } = require('../config/redisUtils');
 
+// Fallback JWT secret in case environment variable is not set
+const JWT_SECRET = process.env.JWT_SECRET || 'utracker_default_secret_key';
+
 // Create a new OAuth client
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -51,7 +54,7 @@ router.post('/google', async (req, res) => {
         name,
         email,
         avatar: picture,
-        categories: [],
+        categories: ['Uncategorized'],
         dailyGoal: ''
       });
 
@@ -74,7 +77,7 @@ router.post('/google', async (req, res) => {
     // Generate JWT
     jwt.sign(
       payload,
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: '7d' },
       async (err, token) => {
         if (err) throw err;

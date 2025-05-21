@@ -16,30 +16,41 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         const initAuth = async () => {
             try {
-                // Get user from localStorage
-                const storedUser = localStorage.getItem('user');
                 const token = localStorage.getItem('token');
+                const storedUser = localStorage.getItem('user');
                 
-                if (storedUser && token) {
-                    // Set user and axios header
+                if (token && storedUser) {
+                    // Set user state
                     setUser(JSON.parse(storedUser));
+                    
+                    // Set default authorization header
                     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
                     
-                    // Try to refresh user data
+                    // Verify token with backend
                     try {
                         const response = await axios.get(`${API_URL}/api/auth/user`);
-                        setUser(response.data);
-                        localStorage.setItem('user', JSON.stringify(response.data));
+                        if (response.data) {
+                            setUser(response.data);
+                            localStorage.setItem('user', JSON.stringify(response.data));
+                        }
                     } catch (error) {
-                        // If unauthorized, logout
-                        if (axios.isAxiosError(error) && error.response?.status === 401) {
-                            logout();
+                        // If token is invalid, clear everything
+                        if (error.response?.status === 401 || error.response?.status === 403) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            delete axios.defaults.headers.common['Authorization'];
+                            setUser(null);
                         }
                     }
+                } else {
+                    // Clear any partial auth state
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    delete axios.defaults.headers.common['Authorization'];
+                    setUser(null);
                 }
             } catch (error) {
                 console.error('Auth initialization error:', error);
-                logout();
             } finally {
                 setLoading(false);
             }
@@ -95,10 +106,7 @@ export function AuthProvider({ children }) {
         // Clear all auth data
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        
-        // Remove auth header
         delete axios.defaults.headers.common['Authorization'];
-        
         setUser(null);
         router.push('/');
     };

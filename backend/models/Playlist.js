@@ -17,7 +17,25 @@ const playlistSchema = new Schema({
   },
   ytPlaylistUrl: {
     type: String,
-    required: true
+    required: false,
+    default: ''
+  },
+  ytPlaylistId: {
+    type: String,
+    required: false,
+    default: ''
+  },
+  isCustomPlaylist: {
+    type: Boolean,
+    default: false
+  },
+  ytInfo: {
+    title: String,
+    description: String,
+    thumbnail: String,
+    channelTitle: String,
+    itemCount: Number,
+    publishedAt: String
   },
   videos: [{
     type: Schema.Types.ObjectId,

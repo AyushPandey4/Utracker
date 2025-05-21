@@ -2,11 +2,21 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import axios from 'axios';
+import { toast } from 'react-hot-toast';
+
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
 
 export default function PlaylistGrid({ playlists, onDelete }) {
   const router = useRouter();
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
 
   const handleDeleteClick = (id) => {
     setDeletingId(id);
@@ -27,6 +37,82 @@ export default function PlaylistGrid({ playlists, onDelete }) {
     router.push(`/playlist/${playlistId}`);
   };
 
+  const handleCategoryClick = async (playlist) => {
+    setSelectedPlaylist(playlist);
+    setShowCategoryModal(true);
+    await fetchCategories();
+  };
+
+  const fetchCategories = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      const response = await axios.get(`${API_URL}/api/user/categories`);
+      setCategories(response.data || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      toast.error('Failed to fetch categories');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCategoryChange = async (category) => {
+    if (!category || category === selectedPlaylist.category) {
+      setShowCategoryModal(false);
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      await axios.patch(
+        `${API_URL}/api/playlist/${selectedPlaylist.id}/category`,
+        { category }
+      );
+
+      // Update the playlist in the local state
+      const updatedPlaylists = playlists.map(p => 
+        p.id === selectedPlaylist.id ? { ...p, category } : p
+      );
+      // You'll need to implement a way to update the parent component's state
+      // This could be through a callback prop like onPlaylistUpdate
+
+      toast.success('Category updated successfully');
+      setShowCategoryModal(false);
+    } catch (error) {
+      console.error('Error updating category:', error);
+      toast.error('Failed to update category');
+    }
+  };
+
+  const handleAddNewCategory = async () => {
+    if (!newCategory.trim()) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      await axios.post(
+        `${API_URL}/api/user/category`,
+        { category: newCategory }
+      );
+
+      await fetchCategories();
+      setNewCategory('');
+      toast.success('Category added successfully');
+    } catch (error) {
+      console.error('Error adding category:', error);
+      toast.error('Failed to add category');
+    }
+  };
+
   // Format minutes as hours and minutes
   const formatTime = (minutes) => {
     if (!minutes) return '0 min';
@@ -37,6 +123,15 @@ export default function PlaylistGrid({ playlists, onDelete }) {
     const mins = minutes % 60;
     
     return `${hours}h${mins > 0 ? ` ${mins}m` : ''}`;
+  };
+
+  // Format view count with K, M abbreviations
+  const formatViewCount = (viewCount) => {
+    if (!viewCount) return '0 views';
+    
+    if (viewCount < 1000) return `${viewCount} views`;
+    if (viewCount < 1000000) return `${(viewCount / 1000).toFixed(1)}K views`;
+    return `${(viewCount / 1000000).toFixed(1)}M views`;
   };
 
   if (playlists.length === 0) {
@@ -71,14 +166,48 @@ export default function PlaylistGrid({ playlists, onDelete }) {
                   {playlist.name}
                 </h3>
                 <div className="flex justify-between items-center mt-1">
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                    {playlist.category || 'Uncategorized'}
-                  </span>
+                  <div className="flex items-center space-x-1">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      {playlist.category || 'Uncategorized'}
+                    </span>
+                    <button
+                      onClick={() => handleCategoryClick(playlist)}
+                      className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                  </div>
                   <span className="text-sm text-gray-500 dark:text-gray-400">
                     {playlist.totalVideos || 0} videos
                   </span>
                 </div>
               </div>
+
+              {/* Thumbnails Preview */}
+              {playlist.thumbnails && playlist.thumbnails.length > 0 ? (
+                <div className="relative h-36 overflow-hidden">
+                  <div className="absolute inset-0">
+                    <img 
+                      src={playlist.thumbnails[0].thumbnail || null} 
+                      alt={playlist.thumbnails[0].title}
+                      className="h-full w-full object-cover"
+                    />
+                    {playlist.thumbnails[0].viewCount && (
+                      <div className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 rounded">
+                        {formatViewCount(playlist.thumbnails[0].viewCount)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-36 bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              )}
 
               {/* Progress Info */}
               <div className="p-4">
@@ -126,6 +255,14 @@ export default function PlaylistGrid({ playlists, onDelete }) {
                     </svg>
                     {playlist.notesCount || 0} notes
                   </div>
+                  {playlist.rewatchCount > 0 && (
+                    <div className="flex items-center text-purple-700 dark:text-purple-300">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                      </svg>
+                      {playlist.rewatchCount} to rewatch
+                    </div>
+                  )}
                 </div>
 
                 {/* Buttons */}
@@ -150,6 +287,73 @@ export default function PlaylistGrid({ playlists, onDelete }) {
           );
         })}
       </div>
+
+      {/* Category Change Modal */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Change Category
+            </h3>
+            
+            {loading ? (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Select Category
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    value={selectedPlaylist?.category || ''}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                  >
+                    <option value="">Uncategorized</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Add New Category
+                  </label>
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="Enter new category"
+                    />
+                    <button
+                      onClick={handleAddNewCategory}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setShowCategoryModal(false)}
+                    className="px-4 py-2 text-gray-700 bg-gray-200 dark:bg-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {confirmDelete && (

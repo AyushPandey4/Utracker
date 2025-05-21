@@ -7,6 +7,7 @@ const User = require('../models/User');
 const Badge = require('../models/Badge');
 const { setCache, getCache, deleteCache } = require('../config/redisUtils');
 const { generateVideoSummary } = require('../services/aiService');
+const { parseTimestamps } = require('../utils/videoUtils');
 
 /**
  * Check if user has access to video
@@ -86,6 +87,66 @@ const checkAndAwardCompletionBadge = async (playlistId, userId) => {
   }
 };
 
+// @route   GET /api/video/pinned
+// @desc    Get all pinned videos
+// @access  Private
+router.get('/pinned', authenticateToken, async (req, res) => {
+  try {
+    // Get all playlists for this user
+    const userPlaylists = await Playlist.find({ userId: req.user.id });
+    const playlistIds = userPlaylists.map(playlist => playlist._id);
+    
+    // Find all pinned videos
+    const pinnedVideos = await Video.find({
+      playlistId: { $in: playlistIds },
+      pinned: true
+    }).select('title ytId status timeSpent notes thumbnail duration viewCount publishedAt channelTitle description playlistId position');
+    
+    // If no pinned videos found
+    if (pinnedVideos.length === 0) {
+      return res.json({ videos: [] });
+    }
+    
+    // Create map of playlist details for each video
+    const playlistMap = {};
+    userPlaylists.forEach(p => {
+      playlistMap[p._id.toString()] = {
+        name: p.name,
+        category: p.category
+      };
+    });
+    
+    // Add playlist information to each video
+    const videosWithPlaylistInfo = pinnedVideos.map(video => {
+      const playlistInfo = playlistMap[video.playlistId.toString()] || {};
+      
+      return {
+        id: video._id,
+        title: video.title,
+        ytId: video.ytId,
+        status: video.status,
+        thumbnail: video.thumbnail,
+        duration: video.duration,
+        timeSpent: video.timeSpent,
+        notes: video.notes,
+        viewCount: video.viewCount,
+        publishedAt: video.publishedAt,
+        channelTitle: video.channelTitle,
+        description: video.description,
+        position: video.position,
+        playlistId: video.playlistId,
+        playlistName: playlistInfo.name || 'Unknown Playlist',
+        playlistCategory: playlistInfo.category || 'Uncategorized'
+      };
+    });
+    
+    res.json({ videos: videosWithPlaylistInfo });
+  } catch (err) {
+    console.error('Error fetching pinned videos:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
 // @route   GET /api/video/:id
 // @desc    Fetch one video by ID
 // @access  Private
@@ -115,7 +176,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     
     // Get playlist info for context
-    const playlist = await Playlist.findById(video.playlistId).select('name category');
+    const playlist = await Playlist.findById(video.playlistId).select('name category isCustomPlaylist');
     
     // Format response
     const result = {
@@ -130,7 +191,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
       playlistId: video.playlistId,
       playlistName: playlist ? playlist.name : 'Unknown',
       playlistCategory: playlist ? playlist.category : 'Unknown',
-      createdAt: video.createdAt
+      isCustomPlaylist: playlist ? playlist.isCustomPlaylist : false,
+      createdAt: video.createdAt,
+      timestamps: video.timestamps || [],
+      resources: video.resources || []
     };
     
     // Cache the result for 1 hour
@@ -152,7 +216,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
     const { status } = req.body;
     
     // Validate status
-    if (!status || !['to-watch', 'in-progress', 'completed'].includes(status)) {
+    if (!status || !['to-watch', 'in-progress', 'completed', 'rewatch'].includes(status)) {
       return res.status(400).json({ msg: 'Invalid status value' });
     }
     
@@ -415,6 +479,524 @@ router.post('/:id/generate-summary', authenticateToken, async (req, res) => {
     }
     
     res.status(500).json({ msg: 'Error generating summary' });
+  }
+});
+
+// @route   POST /api/video/:id/tags
+// @desc    Add tags to a video
+// @access  Private
+router.post('/:id/tags', authenticateToken, async (req, res) => {
+  try {
+    const { tags } = req.body;
+    
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return res.status(400).json({ msg: 'Tags array is required' });
+    }
+    
+    // Format tags (remove # if present, lowercase, trim)
+    const formattedTags = tags.map(tag => 
+      tag.startsWith('#') ? tag.substring(1).trim().toLowerCase() : tag.trim().toLowerCase()
+    ).filter(tag => tag.length > 0);
+    
+    // Find the video
+    const video = await Video.findById(req.params.id);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Ensure the video belongs to a playlist owned by the user
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(403).json({ msg: 'Not authorized to update this video' });
+    }
+    
+    // Add new tags (avoiding duplicates)
+    const existingTags = new Set(video.tags || []);
+    formattedTags.forEach(tag => existingTags.add(tag));
+    
+    // Update video with new tags
+    video.tags = Array.from(existingTags);
+    await video.save();
+    
+    // Clear cache for this video's playlist
+    await deleteCache(`playlist:${video.playlistId}`);
+    
+    res.json({ 
+      success: true, 
+      tags: video.tags 
+    });
+  } catch (err) {
+    console.error('Error adding tags to video:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   DELETE /api/video/:id/tags
+// @desc    Remove tags from a video
+// @access  Private
+router.delete('/:id/tags', authenticateToken, async (req, res) => {
+  try {
+    const { tags } = req.body;
+    
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return res.status(400).json({ msg: 'Tags array is required' });
+    }
+    
+    // Format tags (remove # if present, lowercase, trim)
+    const tagsToRemove = tags.map(tag => 
+      tag.startsWith('#') ? tag.substring(1).trim().toLowerCase() : tag.trim().toLowerCase()
+    );
+    
+    // Find the video
+    const video = await Video.findById(req.params.id);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Ensure the video belongs to a playlist owned by the user
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(403).json({ msg: 'Not authorized to update this video' });
+    }
+    
+    // Remove specified tags
+    video.tags = (video.tags || []).filter(tag => !tagsToRemove.includes(tag));
+    await video.save();
+    
+    // Clear cache for this video's playlist
+    await deleteCache(`playlist:${video.playlistId}`);
+    
+    res.json({ 
+      success: true, 
+      tags: video.tags 
+    });
+  } catch (err) {
+    console.error('Error removing tags from video:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   GET /api/video/search/tags
+// @desc    Search for videos with matching tags
+// @access  Private
+router.get('/search/tags', authenticateToken, async (req, res) => {
+  try {
+    const { query } = req.query;
+    
+    if (!query || query.trim() === '') {
+      return res.status(400).json({ msg: 'Search query is required' });
+    }
+    
+    // Get all playlists for this user
+    const userPlaylists = await Playlist.find({ userId: req.user.id });
+    const playlistIds = userPlaylists.map(playlist => playlist._id);
+    
+    // Find videos with tags containing the query string
+    // Using case-insensitive search with regex
+    const videos = await Video.find({
+      playlistId: { $in: playlistIds },
+      tags: { $regex: query, $options: 'i' }
+    })
+    .select('title ytId status timeSpent notes thumbnail duration viewCount tags playlistId')
+    .limit(100);  // Limit results to prevent overwhelming response
+    
+    // Get playlist info for each video
+    const playlistMap = {};
+    for (const vid of videos) {
+      if (!playlistMap[vid.playlistId]) {
+        const pl = await Playlist.findById(vid.playlistId).select('name');
+        playlistMap[vid.playlistId] = pl ? pl.name : 'Unknown Playlist';
+      }
+    }
+    
+    // Format response
+    const formattedVideos = videos.map(video => ({
+      id: video._id,
+      title: video.title,
+      ytId: video.ytId,
+      status: video.status,
+      timeSpent: video.timeSpent,
+      notes: video.notes,
+      thumbnail: video.thumbnail,
+      duration: video.duration,
+      viewCount: video.viewCount,
+      tags: video.tags || [],
+      playlistId: video.playlistId,
+      playlistName: playlistMap[video.playlistId]
+    }));
+    
+    res.json({
+      count: formattedVideos.length,
+      videos: formattedVideos
+    });
+  } catch (err) {
+    console.error('Error searching tags:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   POST /api/video/:id/resources
+// @desc    Add a resource to a video
+// @access  Private
+router.post('/:id/resources', authenticateToken, async (req, res) => {
+  try {
+    const { title, url, type } = req.body;
+    
+    // Validate request
+    if (!title || !url) {
+      return res.status(400).json({ msg: 'Title and URL are required' });
+    }
+    
+    // Find the video
+    const video = await Video.findById(req.params.id);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Ensure the video belongs to a playlist owned by the user
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(403).json({ msg: 'Not authorized to update this video' });
+    }
+    
+    // Create new resource
+    const newResource = {
+      title,
+      url,
+      type: type || 'other'
+    };
+    
+    // Add resource to video
+    video.resources.push(newResource);
+    await video.save();
+    
+    // Clear cache
+    await deleteCache(`video:${video._id}`);
+    
+    res.json({ 
+      success: true, 
+      resources: video.resources 
+    });
+  } catch (err) {
+    console.error('Error adding resource to video:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   DELETE /api/video/:id/resources/:resourceId
+// @desc    Delete a resource from a video
+// @access  Private
+router.delete('/:id/resources/:resourceId', authenticateToken, async (req, res) => {
+  try {
+    // Find the video
+    const video = await Video.findById(req.params.id);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Ensure the video belongs to a playlist owned by the user
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(403).json({ msg: 'Not authorized to update this video' });
+    }
+    
+    // Find the resource by its MongoDB ObjectId
+    const resourceIndex = video.resources.findIndex(
+      resource => resource._id.toString() === req.params.resourceId
+    );
+    
+    if (resourceIndex === -1) {
+      return res.status(404).json({ msg: 'Resource not found' });
+    }
+    
+    // Remove the resource
+    video.resources.splice(resourceIndex, 1);
+    await video.save();
+    
+    // Clear cache
+    await deleteCache(`video:${video._id}`);
+    
+    res.json({ 
+      success: true, 
+      resources: video.resources 
+    });
+  } catch (err) {
+    console.error('Error deleting resource from video:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   PUT /api/video/:id/resources/:resourceId
+// @desc    Update a resource
+// @access  Private
+router.put('/:id/resources/:resourceId', authenticateToken, async (req, res) => {
+  try {
+    const { title, url, type } = req.body;
+    
+    // Find the video
+    const video = await Video.findById(req.params.id);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Ensure the video belongs to a playlist owned by the user
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(403).json({ msg: 'Not authorized to update this video' });
+    }
+    
+    // Find the resource by its MongoDB ObjectId
+    const resourceIndex = video.resources.findIndex(
+      resource => resource._id.toString() === req.params.resourceId
+    );
+    
+    if (resourceIndex === -1) {
+      return res.status(404).json({ msg: 'Resource not found' });
+    }
+    
+    // Update the resource
+    if (title) video.resources[resourceIndex].title = title;
+    if (url) video.resources[resourceIndex].url = url;
+    if (type) video.resources[resourceIndex].type = type;
+    
+    await video.save();
+    
+    // Clear cache
+    await deleteCache(`video:${video._id}`);
+    
+    res.json({ 
+      success: true, 
+      resources: video.resources 
+    });
+  } catch (err) {
+    console.error('Error updating resource:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   GET /api/video/search/notes
+// @desc    Search for videos with matching notes content
+// @access  Private
+router.get('/search/notes', authenticateToken, async (req, res) => {
+  try {
+    const { query } = req.query;
+    
+    if (!query || query.trim() === '') {
+      return res.status(400).json({ msg: 'Search query is required' });
+    }
+    
+    // Get all playlists for this user
+    const userPlaylists = await Playlist.find({ userId: req.user.id });
+    const playlistIds = userPlaylists.map(playlist => playlist._id);
+    
+    // Find videos with notes containing the query string
+    // Using case-insensitive search with regex
+    const videos = await Video.find({
+      playlistId: { $in: playlistIds },
+      notes: { $regex: query, $options: 'i' }
+    })
+    .select('title ytId status timeSpent notes thumbnail duration viewCount tags playlistId')
+    .limit(100);  // Limit results to prevent overwhelming response
+    
+    // Get playlist info for each video
+    const playlistMap = {};
+    for (const vid of videos) {
+      if (!playlistMap[vid.playlistId]) {
+        const pl = await Playlist.findById(vid.playlistId).select('name');
+        playlistMap[vid.playlistId] = pl ? pl.name : 'Unknown Playlist';
+      }
+    }
+    
+    // Format response
+    const formattedVideos = videos.map(video => ({
+      id: video._id,
+      title: video.title,
+      ytId: video.ytId,
+      status: video.status,
+      timeSpent: video.timeSpent,
+      // Include a snippet of the matched notes with context
+      notes: video.notes && video.notes.length > 300 
+        ? highlightMatchedText(video.notes, query, 300)
+        : video.notes,
+      thumbnail: video.thumbnail,
+      duration: video.duration,
+      viewCount: video.viewCount,
+      tags: video.tags || [],
+      playlistId: video.playlistId,
+      playlistName: playlistMap[video.playlistId]
+    }));
+    
+    res.json({
+      count: formattedVideos.length,
+      videos: formattedVideos
+    });
+  } catch (err) {
+    console.error('Error searching notes:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+/**
+ * Create a snippet of text with the matched query highlighted
+ * @param {string} text - The full text to search in
+ * @param {string} query - The search query
+ * @param {number} maxLength - Maximum length of the snippet
+ * @returns {string} - Formatted snippet with context
+ */
+function highlightMatchedText(text, query, maxLength) {
+  // Find the first occurrence of the query (case insensitive)
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  
+  if (index === -1) {
+    // If not found (which shouldn't happen), return the beginning of the text
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  }
+  
+  // Calculate start and end positions for the snippet
+  let start = Math.max(0, index - 100);
+  let end = Math.min(text.length, index + query.length + 100);
+  
+  // Adjust if the snippet would be too long
+  if (end - start > maxLength) {
+    const halfLength = Math.floor(maxLength / 2);
+    start = Math.max(0, index - halfLength);
+    end = Math.min(text.length, index + query.length + halfLength);
+  }
+  
+  // Add ellipsis if we're not at the beginning/end of the full text
+  let snippet = '';
+  if (start > 0) snippet += '...';
+  snippet += text.substring(start, end);
+  if (end < text.length) snippet += '...';
+  
+  return snippet;
+}
+
+// @route   POST /api/video
+// @desc    Add a new video
+// @access  Private
+router.post('/', authenticateToken, async (req, res) => {
+  try {
+    const { playlistId, ytId, title, description, thumbnail, duration, viewCount, likeCount, publishedAt, channelTitle } = req.body;
+    
+    // Check if playlist exists and is custom
+    const playlist = await Playlist.findOne({
+      _id: playlistId,
+      userId: req.user.id
+    });
+
+    if (!playlist) {
+      return res.status(404).json({ msg: 'Playlist not found' });
+    }
+
+    if (!playlist.isCustomPlaylist) {
+      return res.status(403).json({ msg: 'Cannot add videos to non-custom playlists' });
+    }
+    
+    // Parse timestamps from description
+    const timestamps = parseTimestamps(description);
+    
+    const video = new Video({
+      playlistId,
+      ytId,
+      title,
+      description,
+      thumbnail,
+      duration,
+      viewCount,
+      likeCount,
+      publishedAt,
+      channelTitle,
+      timestamps
+    });
+    
+    await video.save();
+
+    // Add video to playlist's videos array
+    playlist.videos.push(video._id);
+    await playlist.save();
+    
+    res.status(201).json(video);
+  } catch (err) {
+    console.error('Error adding video:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// @route   DELETE /api/video/:id/remove-from-playlist
+// @desc    Remove a video from a custom playlist
+// @access  Private
+router.delete('/:id/remove-from-playlist', authenticateToken, async (req, res) => {
+  try {
+    const videoId = req.params.id;
+    
+    // Find the video
+    const video = await Video.findById(videoId);
+    
+    if (!video) {
+      return res.status(404).json({ msg: 'Video not found' });
+    }
+    
+    // Find the playlist
+    const playlist = await Playlist.findOne({
+      _id: video.playlistId,
+      userId: req.user.id
+    });
+    
+    if (!playlist) {
+      return res.status(404).json({ msg: 'Playlist not found' });
+    }
+    
+    // Check if it's a custom playlist
+    if (!playlist.isCustomPlaylist) {
+      return res.status(403).json({ msg: 'Cannot remove videos from non-custom playlists' });
+    }
+    
+    // Remove video from playlist's videos array
+    playlist.videos = playlist.videos.filter(vid => vid.toString() !== videoId);
+    await playlist.save();
+    
+    // Delete the video
+    await Video.findByIdAndDelete(videoId);
+    
+    // Clear cache
+    await deleteCache(`video:${videoId}`);
+    await deleteCache(`playlist:${playlist._id}`);
+    
+    res.json({ 
+      success: true,
+      msg: 'Video removed from playlist successfully'
+    });
+  } catch (err) {
+    console.error('Error removing video from playlist:', err);
+    res.status(500).json({ msg: 'Server error' });
   }
 });
 
